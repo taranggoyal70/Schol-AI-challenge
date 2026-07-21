@@ -229,3 +229,56 @@ export function runRobustnessStudy(
   );
   return summarizeRobustnessStudy(baseConfig, cohorts, policy);
 }
+
+export type RobustnessVerdict = "robust" | "promising" | "inconclusive" | "fragile";
+
+export interface RobustnessGrade {
+  verdict: RobustnessVerdict;
+  confidence: number; // 0..1
+  rationale: string;
+}
+
+/**
+ * Turn a robustness study's headline signals into a plain-language verdict, so
+ * the evolution loop can decide whether a challenger has earned promotion
+ * instead of leaving a human to eyeball four separate rates.
+ */
+export function gradeRobustness(
+  study: Pick<
+    RobustnessStudy,
+    | "challengerHoldoutRate"
+    | "averageChallengerUplift"
+    | "discoveryNoDecisionRate"
+    | "incumbentStability"
+  >,
+): RobustnessGrade {
+  const { challengerHoldoutRate, averageChallengerUplift, discoveryNoDecisionRate } = study;
+  const confidence = Math.max(0, Math.min(1, challengerHoldoutRate));
+
+  if (discoveryNoDecisionRate >= 0.5) {
+    return {
+      verdict: "inconclusive",
+      confidence,
+      rationale: "Discovery rarely reached a decision; more sessions are needed.",
+    };
+  }
+  if (challengerHoldoutRate >= 0.7 && averageChallengerUplift > 0) {
+    return {
+      verdict: "robust",
+      confidence,
+      rationale: "The challenger wins on held-out cohorts with a positive average uplift.",
+    };
+  }
+  if (challengerHoldoutRate >= 0.5 && averageChallengerUplift > 0) {
+    return {
+      verdict: "promising",
+      confidence,
+      rationale: "The challenger wins a majority of holdouts but the margin is not yet decisive.",
+    };
+  }
+  return {
+    verdict: "fragile",
+    confidence,
+    rationale: "The challenger fails to hold up out-of-sample; keep the incumbent.",
+  };
+}
